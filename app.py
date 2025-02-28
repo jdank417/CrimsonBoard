@@ -13,15 +13,6 @@ pdf_path = os.path.join(
     "executive_summary.pdf"
 )
 
-def extract_report_text(path):
-    """Extract all text from the PDF, concatenating each page."""
-    text = ""
-    with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
-            page_text = page.extract_text() or ""
-            text += page_text + "\n"
-    return text
-
 def remove_commas(s):
     """Remove commas from a string (e.g. '6,561' -> '6561')."""
     return s.replace(",", "")
@@ -38,15 +29,19 @@ def extract_float(s):
     match = re.search(r"[\d.]+", s)
     return float(match.group()) if match else 0.0
 
+def extract_report_text(path):
+    """Extract all text from the PDF, concatenating each page."""
+    text = ""
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text() or ""
+            text += page_text + "\n"
+    return text
+
 def parse_report_data(text):
     """
-    A flexible parser that attempts to capture:
-    - Date range & days in period
-    - Basic usage metrics
-    - Environmental metrics
-    - Color/duplex composition
-    - Job type composition
-    - Daily totals (for a time-series chart)
+    Extract summary metrics and composition data from PDF text.
+    The daily totals chart/slider are removed completely.
     """
     data = {
         "report_period": "",
@@ -72,13 +67,12 @@ def parse_report_data(text):
         "scan_count": 0,
         "copy_count": 0,
         "print_count": 0,
-        "fax_count": 0,
-        "daily_totals": []
+        "fax_count": 0
     }
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
-    # Try to find a line that looks like "Feb 26, 2025 to Feb 26, 2025."
+    # Extract date range
     for line in lines:
         if re.search(r"\w+ \d{1,2}, \d{4} to \w+ \d{1,2}, \d{4}", line):
             data["report_period"] = line
@@ -103,12 +97,6 @@ def parse_report_data(text):
             data["pages_per_day"] = extract_int(line.split(":", 1)[1])
         elif line.startswith("Sheets per day:"):
             data["sheets_per_day"] = extract_int(line.split(":", 1)[1])
-        elif "trees" in line.lower():
-            data["trees_consumed"] = extract_float(line)
-        elif "grams" in line.lower() or "kg" in line.lower():
-            data["co2_produced"] = extract_float(line)
-        elif "hours" in line.lower():
-            data["env_bulb_hours"] = extract_float(line)
         elif line.startswith("Grayscale:"):
             after = line.split("Grayscale:", 1)[1].strip()
             match_pct = re.search(r"([\d.]+)%", after)
@@ -143,57 +131,47 @@ def parse_report_data(text):
             data["print_count"] = extract_int(line.split("Print:", 1)[1])
         elif line.startswith("Fax:"):
             data["fax_count"] = extract_int(line.split("Fax:", 1)[1])
-        elif re.fullmatch(r"[\d,]+", line):
-            val = extract_int(line)
-            if val > 0:
-                data["daily_totals"].append(val)
+        elif "trees" in line.lower():
+            data["trees_consumed"] = extract_float(line)
+        elif "grams" in line.lower() or "kg" in line.lower():
+            data["co2_produced"] = extract_float(line)
+        elif "hours" in line.lower():
+            data["env_bulb_hours"] = extract_float(line)
         i += 1
 
     return data
 
 @app.route("/")
 def dashboard():
-    pdf_text = extract_report_text(pdf_path)
-
-    # Debug: print the PDF text so you can see the lines
+    # Extract text from PDF
+    with pdfplumber.open(pdf_path) as pdf:
+        full_text = ""
+        for page in pdf.pages:
+            full_text += (page.extract_text() or "") + "\n"
     print("==== PDF TEXT START ====")
-    print(pdf_text)
+    print(full_text)
     print("==== PDF TEXT END ====")
 
-    data = parse_report_data(pdf_text)
+    data = parse_report_data(full_text)
+    print("No daily totals or line chart in this version.")
 
-    # Prepare job type composition chart data
-    job_labels = ["Scan", "Copy", "Print", "Fax"]
-    job_counts = [
-        data["scan_count"],
-        data["copy_count"],
-        data["print_count"],
-        data["fax_count"]
-    ]
-
-    # Prepare color composition
+    # Prepare composition data for the charts
     color_labels = ["Grayscale", "Color"]
     color_values = [data["grayscale_pct"], data["color_pct"]]
-
-    # Prepare duplex composition
     duplex_labels = ["Duplex", "Simplex"]
     duplex_values = [data["duplex_pct"], data["simplex_pct"]]
-
-    # Prepare daily totals for a line chart
-    daily_labels = [f"Day {i+1}" for i in range(len(data["daily_totals"]))]
-    daily_values = data["daily_totals"]
+    job_labels = ["Scan", "Copy", "Print", "Fax"]
+    job_counts = [data["scan_count"], data["copy_count"], data["print_count"], data["fax_count"]]
 
     return render_template(
         "index.html",
         data=data,
-        job_labels=job_labels,
-        job_counts=job_counts,
         color_labels=color_labels,
         color_values=color_values,
         duplex_labels=duplex_labels,
         duplex_values=duplex_values,
-        daily_labels=daily_labels,
-        daily_values=daily_values
+        job_labels=job_labels,
+        job_counts=job_counts
     )
 
 if __name__ == "__main__":
