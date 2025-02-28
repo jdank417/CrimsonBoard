@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Executive Summary Dashboard</title>
+
+  <!-- Bootstrap 5 from CDN -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+
+  <!-- Relaxed Content Security Policy for local dev -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self';
+                 script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net;
+                 style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+                 object-src 'none';">
+
+  <!-- Chart.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    /* Harvard Crimson color #A51C30 for navbar background */
+    .navbar-harvard {
+      background-color: #A51C30 !important;
+    }
+    .navbar-harvard .navbar-brand,
+    .navbar-harvard .nav-link {
+      color: #ffffff !important;
+    }
+    .navbar-harvard .nav-link:hover {
+      color: #e2e2e2 !important;
+    }
+
+    /* Body styling */
+    body {
+      margin: 20px;
+      background: #f8f9fa;
+    }
+
+    /* Card styling */
+    .metric-card {
+      background: #fff;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 0 5px #ccc;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    /* Adjust chart containers */
+    .chart-container {
+      width: 100%;
+      max-width: 300px;
+      margin: 0 auto;
+    }
+
+    .chart-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 30px;
+    }
+
+    .section-title {
+      margin-top: 40px;
+      margin-bottom: 20px;
+      text-align: center;
+      color: #A51C30; /* Harvard Crimson accent for section titles */
+    }
+
+    /* Range slider container */
+    #sliderContainer {
+      text-align: center;
+      margin-top: 10px;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Harvard-inspired Navbar -->
+<nav class="navbar navbar-expand-lg navbar-harvard mb-4">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">Harvard Crimson Print Dashboard</a>
+  </div>
+</nav>
+
+<div class="container">
+
+  <!-- Reporting Period -->
+  <div class="row">
+    <div class="col text-center">
+      <h3>{{ data.report_period }}</h3>
+      {% if data.days_in_period > 0 %}
+        <p>Days in Period: {{ data.days_in_period }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Usage Summary Metrics -->
+  <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-6 g-3">
+    <div class="col">
+      <div class="metric-card">
+        <strong>Active Users</strong><br/>
+        {{ data.active_users }}
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card">
+        <strong>Active Printers</strong><br/>
+        {{ data.active_printers }}
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card">
+        <strong>Total Pages</strong><br/>
+        {{ data.total_pages }}
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card">
+        <strong>Total Jobs</strong><br/>
+        {{ data.total_jobs }}
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card">
+        <strong>Pages per Day</strong><br/>
+        {{ data.pages_per_day }}
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card">
+        <strong>Sheets per Day</strong><br/>
+        {{ data.sheets_per_day }}
+      </div>
+    </div>
+  </div>
+
+  <!-- Daily Totals (Time-Series) with a slider to adjust time frame -->
+  {% if daily_values %}
+    <h4 class="section-title">Daily Totals</h4>
+    <div class="chart-container mb-3">
+      <canvas id="dailyChart"></canvas>
+    </div>
+    <div id="sliderContainer">
+      <label for="dayRangeSlider"><strong>Select # of Days:</strong></label><br/>
+      <input
+        type="range"
+        class="form-range"
+        id="dayRangeSlider"
+        min="1"
+        max="{{ daily_values|length }}"
+        value="{{ daily_values|length }}"
+        oninput="updateDailyChart(this.value)"
+      />
+    </div>
+  {% endif %}
+
+  <!-- Three Pie Charts in one row (Color, Duplex, Job Type) -->
+  <h4 class="section-title">Composition Charts</h4>
+  <div class="chart-row">
+    <!-- Color Composition -->
+    <div class="chart-container">
+      <canvas id="colorChart"></canvas>
+      <p class="mt-2 text-center">
+        Grayscale: {{ data.grayscale_pct }}% ({{ data.grayscale_count }} pages)<br>
+        Color: {{ data.color_pct }}% ({{ data.color_count }} pages)
+      </p>
+    </div>
+
+    <!-- Duplex Composition -->
+    <div class="chart-container">
+      <canvas id="duplexChart"></canvas>
+      <p class="mt-2 text-center">
+        Duplex: {{ data.duplex_pct }}% ({{ data.duplex_count }} pages)<br>
+        Simplex: {{ data.simplex_pct }}% ({{ data.simplex_count }} pages)
+      </p>
+    </div>
+
+    <!-- Job Type Composition -->
+    <div class="chart-container">
+      <canvas id="jobChart"></canvas>
+      <p class="mt-2 text-center">
+        Scan: {{ data.scan_count }} | Copy: {{ data.copy_count }} |
+        Print: {{ data.print_count }} | Fax: {{ data.fax_count }}
+      </p>
+    </div>
+  </div>
+
+</div><!-- /.container -->
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+  // We'll define some global variables for daily data so we can update them
+  let dailyChart = null;
+  let allDailyLabels = {{ daily_labels|tojson }};
+  let allDailyValues = {{ daily_values|tojson }};
+
+  // 1. Render Daily Totals Chart
+  function createDailyChart(endIndex) {
+    const ctx = document.getElementById('dailyChart').getContext('2d');
+    const labelsSlice = allDailyLabels.slice(0, endIndex);
+    const dataSlice = allDailyValues.slice(0, endIndex);
+
+    dailyChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labelsSlice,
+        datasets: [{
+          label: 'Pages per Day',
+          data: dataSlice,
+          borderColor: '#A51C30', // Harvard Crimson
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true }
+        }
+      }
+    });
+  }
+
+  // Update the daily chart when the slider changes
+  function updateDailyChart(val) {
+    const endIndex = parseInt(val, 10);
+    if (dailyChart) {
+      dailyChart.data.labels = allDailyLabels.slice(0, endIndex);
+      dailyChart.data.datasets[0].data = allDailyValues.slice(0, endIndex);
+      dailyChart.update();
+    }
+  }
+
+  // 2. Color Composition
+  const colorLabels = {{ color_labels|tojson }};
+  const colorData = {{ color_values|tojson }};
+  const colorCtx = document.getElementById('colorChart').getContext('2d');
+  new Chart(colorCtx, {
+    type: 'pie',
+    data: {
+      labels: colorLabels,
+      datasets: [{
+        data: colorData,
+        backgroundColor: ['#6c757d', '#ffc107'] // grayscale=gray, color=yellow
+      }]
+    }
+  });
+
+  // 3. Duplex Composition
+  const duplexLabels = {{ duplex_labels|tojson }};
+  const duplexData = {{ duplex_values|tojson }};
+  const duplexCtx = document.getElementById('duplexChart').getContext('2d');
+  new Chart(duplexCtx, {
+    type: 'pie',
+    data: {
+      labels: duplexLabels,
+      datasets: [{
+        data: duplexData,
+        backgroundColor: ['#198754', '#dc3545'] // green, red
+      }]
+    }
+  });
+
+  // 4. Job Type Composition
+  const jobLabels = {{ job_labels|tojson }};
+  const jobCounts = {{ job_counts|tojson }};
+  const jobCtx = document.getElementById('jobChart').getContext('2d');
+  new Chart(jobCtx, {
+    type: 'doughnut',
+    data: {
+      labels: jobLabels,
+      datasets: [{
+        data: jobCounts,
+        backgroundColor: ['#36A2EB', '#4BC0C0', '#FFCE56', '#FF6384']
+      }]
+    }
+  });
+
+  // Initialize daily chart if we have daily data
+  window.addEventListener('DOMContentLoaded', () => {
+    const totalDays = allDailyValues.length;
+    if (totalDays > 0) {
+      createDailyChart(totalDays); // Start with the full range
+    }
+  });
+</script>
+
+</body>
+</html>
